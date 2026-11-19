@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -23,15 +24,17 @@ class MainActivity : FlutterActivity() {
     private var socket: BluetoothSocket? = null
 
     private val perms = arrayOf(
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.BLUETOOTH_SCAN,
-        )
+        Manifest.permission.BLUETOOTH_CONNECT,
+        Manifest.permission.BLUETOOTH_SCAN,
+    )
 
-        private fun hasAllPermissions(): Boolean =
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                perms.all { check_selfPermission(it) == PackageManager.PERMISSION_GRANTED }
+    private fun hasAllPermissions(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+            perms.all {
+                ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+            }
 
-        private fun adapter(): BluetoothAdapter? =
+    private fun adapter(): BluetoothAdapter? =
         (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
