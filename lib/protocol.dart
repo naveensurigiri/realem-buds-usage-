@@ -11,9 +11,9 @@ const int cmdModeQuery = 0x0C01;
 const int cmdModeReply = 0x0C81;
 const int cmdNotify = 0x0402;
 
-const int modeTransparency = 0x01;
-const int modeAnc = 0x02;
-const int modeNormal = 0x08;
+const int modeNormal = 0x01;
+const int modeTransparency = 0x02;
+const int modeAnc = 0x08;
 
 String modeName(int? code) {
   switch (code) {

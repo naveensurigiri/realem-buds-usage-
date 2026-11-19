@@ -19,6 +19,11 @@ class ModeStat {
   int seconds = 0;
 }
 
+class DailyStat {
+  int seconds = 0;
+  final Map<int, int> modeSeconds = {modeAnc: 0, modeTransparency: 0, modeNormal: 0};
+}
+
 class BudsController extends ChangeNotifier {
   final Rfcomm _link = Rfcomm();
   final FrameReader _reader = FrameReader();
@@ -38,6 +43,7 @@ class BudsController extends ChangeNotifier {
     modeTransparency: ModeStat(),
     modeNormal: ModeStat(),
   };
+  final Map<String, DailyStat> dailyStats = {};
 
   DateTime? _modeSince;
   Timer? _poll;
@@ -45,6 +51,10 @@ class BudsController extends ChangeNotifier {
   int _seq = 0;
   int _attempt = 0;
   bool _want = false;
+
+  // Aggressive request throttling — user: "send very less requests per minute, don't over throttle the model"
+  static const int minRequestIntervalMs = 30000; // 30 seconds between request batches
+  DateTime? _lastRequestTime;
 
   Future<void> init() async {
     _prefs = await SharedPreferences.getInstance();
@@ -59,6 +69,23 @@ class BudsController extends ChangeNotifier {
           if (s != null) {
             s.count = (e.value as List)[0] as int;
             s.seconds = (e.value as List)[1] as int;
+          }
+        }
+      } catch (_) {}
+    }
+    final rawDaily = _prefs!.getString('dailyStats');
+    if (rawDaily != null) {
+      try {
+        final m = jsonDecode(rawDaily) as Map<String, dynamic>;
+        for (final e in m.entries) {
+          final day = dailyStats.putIfAbsent(e.key, () => DailyStat());
+          final d = e.value as Map<String, dynamic>;
+          day.seconds = d['seconds'] as int;
+          final ms = d['modeSeconds'] as Map<String, dynamic>?;
+          if (ms != null) {
+            for (final me in ms.entries) {
+              day.modeSeconds[int.parse(me.key)] = me.value as int;
+            }
           }
         }
       } catch (_) {}
@@ -194,6 +221,16 @@ class BudsController extends ChangeNotifier {
   }
 
   void _send(Uint8List b) {
+    // Throttle: enforce minimum interval between outgoing requests
+    final now = DateTime.now();
+    if (_lastRequestTime != null) {
+      final elapsed = now.difference(_lastRequestTime!).inMilliseconds;
+      if (elapsed < minRequestIntervalMs) {
+        // Skip this request — too soon since last batch
+        return;
+      }
+    }
+    _lastRequestTime = now;
     unawaited(_link.send(b).catchError((Object _) {}));
   }
 
@@ -201,7 +238,8 @@ class BudsController extends ChangeNotifier {
     _stopPolling();
     _send(buildFrame(cmdInfo, _next(), const []));
     _query();
-    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _query());
+    // Aggressive throttling: poll every 60s; _send() enforces 30s min interval per batch
+    _poll = Timer.periodic(const Duration(seconds: 60), (_) => _query());
   }
 
   void _stopPolling() {
@@ -244,8 +282,20 @@ class BudsController extends ChangeNotifier {
     final cur = modeCode;
     if (since != null && cur != null) {
       stats[cur]?.seconds += DateTime.now().difference(since).inSeconds;
+      _recordDaily(cur, DateTime.now().difference(since).inSeconds);
     }
   }
+
+  void _recordDaily(int mode, int seconds) {
+    final today = _dateKey(DateTime.now());
+    final day = dailyStats.putIfAbsent(today, () => DailyStat());
+    day.seconds += seconds;
+    day.modeSeconds[mode] = (day.modeSeconds[mode] ?? 0) + seconds;
+    _save();
+  }
+
+  static String _dateKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   void _setMode(int code) {
     if (code == modeCode) return;
@@ -271,5 +321,69 @@ class BudsController extends ChangeNotifier {
         for (final e in stats.entries) '${e.key}': [e.value.count, e.value.seconds],
       }),
     );
+    _prefs?.setString(
+      'dailyStats',
+      jsonEncode({
+        for (final e in dailyStats.entries)
+          e.key: {
+            'seconds': e.value.seconds,
+            'modeSeconds': {
+              for (final me in e.value.modeSeconds.entries) '${me.key}': me.value,
+            },
+          },
+      }),
+    );
+  }
+
+  // ── UI-facing state (not persisted; live session only) ──
+
+  String activeAudioDevice = 'phone';
+  bool commuteShield = true;
+  String motionEnv = 'indoor';
+  int handoffCount = 0;
+
+  void toggleActiveAudioDevice() {
+    activeAudioDevice = activeAudioDevice == 'phone' ? 'laptop' : 'phone';
+    handoffCount++;
+    notifyListeners();
+  }
+
+  void toggleCommuteShield() {
+    commuteShield = !commuteShield;
+    notifyListeners();
+  }
+
+  void setMotionContext(String v) {
+    motionEnv = v;
+    notifyListeners();
+  }
+
+  void setNoiseMode(int code) {
+    if (modeCode == code) return;
+    _setMode(code);
+  }
+
+  void runAcousticSealTest() {
+    notifyListeners();
+  }
+
+  void updateLRBalance(int v) {
+    notifyListeners();
+  }
+
+  void updateVolumeExposure(int v) {
+    notifyListeners();
+  }
+
+  void clearAllData() {
+    stats[modeAnc]!.count = 0;
+    stats[modeAnc]!.seconds = 0;
+    stats[modeTransparency]!.count = 0;
+    stats[modeTransparency]!.seconds = 0;
+    stats[modeNormal]!.count = 0;
+    stats[modeNormal]!.seconds = 0;
+    dailyStats.clear();
+    _save();
+    notifyListeners();
   }
 }

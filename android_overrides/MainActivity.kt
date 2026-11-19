@@ -29,7 +29,7 @@ class MainActivity : FlutterActivity() {
 
         private fun hasAllPermissions(): Boolean =
             Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
-                perms.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+                perms.all { check_selfPermission(it) == PackageManager.PERMISSION_GRANTED }
 
         private fun adapter(): BluetoothAdapter? =
         (getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager).adapter
